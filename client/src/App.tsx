@@ -73,38 +73,84 @@ function App() {
     };
   }, []);
 
+  function genId(): any {
+    //// Generate a unique ID for a new row
+    return Math.random().toString(36).substr(2, 9);
+  }
+
   if (lastJsonMessage && Object.keys(lastJsonMessage).length > 0) {
     console.log('lastJsonMessage', lastJsonMessage)
-      const message = Model.fromBinary(Uint8Array.from(Object.values(lastJsonMessage))).fork();
-      //const model = Model.fork(message);
-      // const patch = message.api.flush(message);
-      // message.applyPatch(patch);
-      console.log('message', message)
-      const { columnNames, columnOrder, rows } = message.api.getSnapshot();
-      //setData({ columnNames, columnOrder, rows });
-      console.log('columnNames', columnNames)
-      console.log('columnOrder', columnOrder)
-      console.log('rows', rows)
+    const model = Model.fromBinary(Uint8Array.from(Object.values(lastJsonMessage))).fork();
+    //const model = Model.fork(message);
+    // const patch = message.api.flush(message);
+    // message.applyPatch(patch);
+    console.log('message', model)
+    const { columnNames, columnOrder } = model.api.getSnapshot();
+    const rowsServer = []
+    //setData({ columnNames, columnOrder, rows });
+    console.log('columnNames', columnNames)
+    console.log('columnOrder', columnOrder)
+    console.log('rows', rowsServer)
 
+    function gridFromModel(model: Model) {
+      const { columnNames, columnOrder, rows } = model.api.getSnapshot();
       const rowCols = rows.map(row =>
         columnOrder.reduce((acc, colId) => {
           acc[columnNames[colId]] = row[colId];
           return acc;
-        }, {} as Record<string, any>)
-      );
-      console.log('rowCols', rowCols);
-
-      const displayCols = columnOrder.map(colId => ({
-        ...keyColumn(columnNames[colId], textColumn),
-        title: columnNames[colId],
-      }));
-      console.log('displayCols', displayCols);
-      
-    function genId(): any {
-      //// Generate a unique ID for a new row
-      // This is a simple example; in a real application, you might want to use a more robust ID generation method
-      return Math.random().toString(36).substr(2, 9);
+        }, {} as Record<string, any>
+      )
+    );
+      return { columnNames, columnOrder, rows: rowCols };
     }
+    // const rowCols = rowsServer.map(row =>
+    //   columnOrder.reduce((acc, colId) => {
+    //     acc[columnNames[colId]] = row[colId];
+    //     return acc;
+    //   }, {} as Record<string, any>)
+    // );
+    const rowCols = gridFromModel(model);
+    console.log('rowCols', rowCols);
+
+    const displayCols = columnOrder.map(colId => ({
+      ...keyColumn(columnNames[colId], textColumn),
+      title: columnNames[colId],
+    }));
+    console.log('displayCols', displayCols);
+
+    const cn = model.api.vec(['columnNames']);
+    const co = model.api.arr(['columnOrder']);
+    const rows = model.api.arr(['rows']);
+    const r0 = (rows.get(0) as VecApi<any>);
+    
+    // 1. set the name of the first column
+    cn.set([[0, konst('type')]]);
+    // 3. Add age;
+    cn.set([[1, model.api.builder.val()]])
+    // set the name of the second column
+    cn.set([[1,konst('age')]]);
+    // set the column order with age as index 1
+    co.ins(1, [konst(1)]);
+    // 5. Add 'name' column.
+    cn.set([[2, model.api.builder.val()]])
+    cn.set([[2,konst('name')]]);
+    // set the order or the name column to be at index 1
+    co.ins(1, [konst(2)]);
+    
+    // 6. Set name=max for the first row
+    r0.set([[2, konst('max')]])
+    
+    // 7. Add new row type=cat name=paws, age=15.
+    rows.ins(1, [model.api.builder.vec()]);
+    const r1 = rows.get(1) as VecApi<any>;
+    r1.set([[0, konst('cat')],[1, konst(15)],[2, konst('paws')]])
+    
+    // 8. add a new row after first with type=rat, name=whiskers
+    rows.ins(1, [model.api.builder.vec()]);
+    const r2 = (rows.get(1) as VecApi<any>);
+    r2.set([[0, konst('rat')],[1, konst(2)],[2, konst('whiskers')]])
+
+    console.log('model', model.view());
 
     return (
       <>
@@ -121,7 +167,7 @@ function App() {
         </tr>
         </thead>
         <tbody>
-        {rows.map((row, rowIndex) => (
+        {rowsServer.map((row, rowIndex) => (
           <tr key={rowIndex}>
           {columnOrder.map((colId) => (
             <td key={`${rowIndex}-${colId}`} style={{ border: '1px solid #ddd', padding: '8px' }}>
