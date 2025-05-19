@@ -1,8 +1,12 @@
 import { useEffect, useSyncExternalStore, useRef, useMemo, useState } from "react";
 import useWebSocket from "react-use-websocket";
 import { Model, VecApi, ClockVector } from 'json-joy/lib/json-crdt';
+import {encode, decode} from 'json-joy/lib/json-crdt-patch/codec/compact';
 import { Patch, konst } from 'json-joy/lib/json-crdt-patch';
 import throttle from 'lodash.throttle';
+import { DataSheetGrid, keyColumn, textColumn } from 'react-datasheet-grid';
+import 'react-datasheet-grid/dist/style.css'
+
 
 const sessionId = Math.floor(Math.random() * 1000000);
 
@@ -17,33 +21,34 @@ function setGridDefaultCols(model: Model) {
     const r0 = (rows.get(0) as VecApi<any>);
 
     // 1. set the name of the first column
-    cn.set([[0, konst('type')]]);
+    cn.set([[0, konst('colOne')]]);
     // 3. Add age;
-    cn.set([[1, model.api.builder.val()]])
+    //cn.set([[1, model.api.builder.val()]])
     // set the name of the second column
-    cn.set([[1,konst('age')]]);
+    //cn.set([[1,konst('age')]]);
     // set the column order with age as index 1
-    co.ins(1, [konst(1)]);
+    //co.ins(1, [konst(1)]);
     // 5. Add 'name' column.
-    cn.set([[2, model.api.builder.val()]])
-    cn.set([[2,konst('name')]]);
+    //cn.set([[2, model.api.builder.val()]])
+    //cn.set([[2,konst('name')]]);
     // set the order or the name column to be at index 1
-    co.ins(1, [konst(2)]);
+    ///co.ins(1, [konst(2)]);
 
     // 6. Set name=max for the first row
-    r0.set([[2, konst('max')]])
+    //r0.set([[2, konst('max')]])
 
     // 7. Add new row type=cat name=paws, age=15.
-    rows.ins(1, [model.api.builder.vec()]);
-    const r1 = (rows.get(1)  as VecApi<any>);
-    r1.set([[0, konst('cat')],[1, konst(15)],[2, konst('paws')]])
+    //rows.ins(1, [model.api.builder.vec()]);
+    //const r1 = (rows.get(1)  as VecApi<any>);
+    //r1.set([[0, konst('cat')],[1, konst(15)],[2, konst('paws')]])
 
     // 8. add a new row after first with type=rat, name=whiskers
-    rows.ins(1, [model.api.builder.vec()]);
-    const r2 = (rows.get(1)  as VecApi<any>);
-    r2.set([[0, konst('rat')],[1, konst(2)],[2, konst('whiskers')]])
+    //rows.ins(1, [model.api.builder.vec()]);
+    //const r2 = (rows.get(1)  as VecApi<any>);
+    //r2.set([[0, konst('rat')],[1, konst(2)],[2, konst('whiskers')]])
+    r0.set([[0, konst('first entry')]])
 
-    return  model.api.flush().toBinary();
+    return  model
 }
 
 function App() {
@@ -51,7 +56,7 @@ function App() {
     // Track if we've created our model yet
     const modelRef = useRef<Model | null>(null);
     const isFirstMessageRef = useRef(true);
-    const [snapshot, setSnapshot] = useState<any>(null);
+    const [snapshot, setSnapshot] = useState<any>({columnNames: [], columnOrder: [], rows: []});
     // const modelSnapshot = useMemo(() => {
     //     if (modelRef.current) {
     //         // Create a snapshot of the model
@@ -84,23 +89,23 @@ function App() {
         }
     }, [lastJsonMessage]);
 
-        useEffect(() => {
+    useEffect(() => {
         if (!modelRef.current) return;
         
         // Initial snapshot
         setSnapshot(modelRef.current.api.getSnapshot());
         
         // Subscribe to changes
-        const unsubscribe = modelRef.current.api.subscribe(() => {
+        //const unsubscribe = modelRef.current.api.subscribe(() => {
             // Update snapshot when model changes
-            setSnapshot(modelRef.current?.api.getSnapshot() || null);
-        });
+            //setSnapshot(modelRef.current?.api.getSnapshot());
+        //});
         
-        return () => unsubscribe();
+        //return () => unsubscribe();
     }, [modelRef.current]);
     
     // Use the snapshot state for rendering
-    const { columnNames = [], columnOrder = [], rows = [] } = snapshot || {};
+    const { columnNames = [], columnOrder = [], rows = [] } = snapshot;
     
 
     // Subscribe to model changes and send updates to server
@@ -254,9 +259,13 @@ function App() {
     // Initialize editable values when snapshot changes
     useEffect(() => {
         if (snapshot) {
-            setEditedColumnNames([...columnNames]);
-            setEditedColumnOrder([...columnOrder]);
-            setEditedRows(JSON.parse(JSON.stringify(rows))); // Deep copy
+            // Extract values from the latest snapshot
+            const { columnNames: newColumnNames = [], columnOrder: newColumnOrder = [], rows: newRows = [] } = snapshot;
+            
+            // Update the edited values with the latest snapshot data
+            setEditedColumnNames([...newColumnNames]);
+            setEditedColumnOrder([...newColumnOrder]);
+            setEditedRows(JSON.parse(JSON.stringify(newRows))); // Deep copy
         }
     }, [snapshot]);
     
@@ -322,7 +331,7 @@ function App() {
         
         // Send changes to server
         const patch = modelRef.current.api.flush();
-        sendThrottledJsonMessage(patch.toBinary());
+        sendThrottledJsonMessage(encode(patch));
         console.log("Applied changes and sent to server");
     };
     
@@ -369,6 +378,45 @@ function App() {
                 {snapshot ? (
                     <div>
                         <h2>Model Snapshot:</h2>
+                        <div className="dataGrid">
+                            <DataSheetGrid
+                                value={rows.map(row => {
+                                    // Convert row array to object with column keys
+                                    const rowObj = {};
+                                    row.forEach((cell, index) => {
+                                        const colName = columnNames[index] || `col-${index}`;
+                                        rowObj[colName] = cell;
+                                    });
+                                    return rowObj;
+                                })}
+                                columns={[
+                                    {
+                                        ...keyColumn('colOne', textColumn),
+                                        title: 'colOne'
+                                    }
+                                ]}
+                                // onChange={(rows) => {
+                                //     const newEditedRows = [...editedRows];
+                                //     rows.forEach((row, rowIndex) => {
+                                //         if (row && typeof row === 'object') {
+                                //             Object.entries(row).forEach(([key, value]) => {
+                                //                 const colIndex = key.startsWith('col-') ? 
+                                //                     parseInt(key.substring(4)) : 
+                                //                     parseInt(key);
+                                                
+                                //                 if (!isNaN(colIndex)) {
+                                //                     if (!newEditedRows[rowIndex]) {
+                                //                         newEditedRows[rowIndex] = {};
+                                //                     }
+                                //                     newEditedRows[rowIndex][colIndex] = value;
+                                //                 }
+                                //             });
+                                //         }
+                                //     });
+                                //     setEditedRows(newEditedRows);
+                                // }}
+                            />
+                        </div>
                         <div className="data-editor">
                             <h3>Column Names:</h3>
                             <div className="column-names">
@@ -458,9 +506,10 @@ function App() {
                 <button
                     onClick={() => {
                         if (modelRef.current) {
-                            const modelSend = setGridDefaultCols(modelRef.current);
+                            //const modelSend = setGridDefaultCols(modelRef.current);
+                            setGridDefaultCols(modelRef.current);
                             // Send changes to server
-                            sendThrottledJsonMessage(modelSend);
+                            sendThrottledJsonMessage(encode(modelRef.current.api.flush()));
                             console.log("Set grid default columns and sent to server");
                         } else {
                             console.error("Model is not initialized yet");
