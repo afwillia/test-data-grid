@@ -13,9 +13,10 @@ const sessionId = Math.floor(Math.random() * 1000000);
 
 function gridToModel(gridRows, model) {
     const rows = gridRows.map(row => {
-        const { id, ...rest } = row;
-        return { id: Number(id), ...rest };
+        const { ...rest } = row;
+        return { ...rest };
     });
+    console.log('rows', rows)
     const columnNames = Object.keys(gridRows[0] || {});
     const columnOrder = columnNames.map(name => ({ name }));
     console.log('rows:', rows);
@@ -47,44 +48,106 @@ function gridToModel(gridRows, model) {
     return model
 }
 
+function modelToGrid(model) {
+    const rows = model.api.getSnapshot().rows;
+    const columnNames = model.api.getSnapshot().columnNames;
+    const columnOrder = model.api.getSnapshot().columnOrder;
+    console.log('row converted:', rows);
+    console.log('columnNames:', columnNames);
+    console.log('columnOrder:', columnOrder);
+    // convert rows to grid format
+    const gridRows = rows.map(row => {
+        console.log('row:', row);
+        const { id, ...rest } = row;
+        return [{'colOne': 'bobobbo'}];
+    }
+    );
+    console.log('gridRows:', gridRows);
+    return [{'colOne': rows}];
+    //return gridRows.map(row => {
+}
+
 function App() {
-    // Create reactive values for rows and columns
-    const [gridRows, setGridRows] = useState<Record<string, any>[]>([{ colOne: 'loaded value'}]);
+
+    const modelRef = useRef<Model | null>(null);
+    const getModel = () => modelRef.current;
+        const setModel = (newModel: any) => {
+        if (newModel !== modelRef.current) {
+            console.log("Setting new model");
+            modelRef.current = newModel;
+            // Force the effect to run by updating a state variable
+            setModelVersion(prev => prev + 1);
+        }
+    };
+    const [snapshot, setSnapshot] = useState<any>([{rows: [], columnNames: [], columnOrder: []}]);
+    const [modelVersion, setModelVersion] = useState(0);
+        const [gridRows, setGridRows] = useState<Record<string, any>[]>(() => {
+        const initialSnapshot = modelRef.current?.api?.getSnapshot();
+        return initialSnapshot?.rows?.length ? modelToGrid(initialSnapshot) : [{ colOne: null }];
+    });
+        // Create reactive values for rows and columns
     const [gridColumns, setGridColumns] = useState<Column[]>([
         //{...keyColumn('id', textColumn), title: 'id'},
         {...keyColumn('colOne', textColumn), title: 'colOne'}
     ]);
     const [prevRows, setPrevRows] = useState(gridRows)
-    const modelRef = useRef<Model | null>(null);
-    const getModel = () => modelRef.current;
-    const setModel = (newModel: any) => {
-        modelRef.current = newModel;
-    };
+
     const isFirstMessageRef = useRef(true);
-    const [snapshot, setSnapshot] = useState<any>({rows: [], columnNames: [], columnOrder: []});
+
+    useEffect(() => {
+        if (!modelRef.current || !modelRef.current.api) return;
+        
+        // Set initial snapshot
+        setSnapshot(modelRef.current.api.getSnapshot());
+        
+        // Subscribe to model changes
+        const unsubscribe = modelRef.current.api.subscribe(() => {
+            console.log("Model changed - updating snapshot");
+            setSnapshot(modelRef.current?.api.getSnapshot());
+            console.log("Snapshot:", modelRef.current?.api.getSnapshot());
+            setGridRows(modelToGrid(modelRef.current));
+            setGridColumns(
+                (modelRef.current?.api.getSnapshot().columnNames || [])
+                .map((name, i) => ({...keyColumn(name, textColumn), title: name}))
+            );
+            setPrevRows(modelRef.current?.api.getSnapshot().rows || []);
+        });
+        
+        // Clean up subscription when component unmounts or model changes
+        return () => {
+            console.log("Cleaning up model subscription");
+            unsubscribe();
+        };
+    }, [modelRef.current]); // Re-run when modelRef.current changes
+    
 
     function processMessage(binaryData) {
-    if (isFirstMessageRef) {
-        try {
-            const model = Model.fromBinary(binaryData).fork(sessionId);
-            console.log('Model successfully created:', model);
-            return model;
-        } catch (e) {
-            console.error('Error processing message:', e);
-        }
-    } else {
-        if (!modelRef.current) return;
-            
-        const patchData = Uint8Array.from(Object.values(binaryData));
-        try {
-            const patch = Patch.fromBinary(patchData);
-            setModel(modelRef.current.applyPatch(patch));
-            console.log("Applied patch to model");
-        } catch (error) {
-            console.error("Error applying patch:", error);
+        console.log('First message:', isFirstMessageRef.current);
+        console.log('processing message:', binaryData);
+        if (isFirstMessageRef.current) {
+            try {
+                const bd = Uint8Array.from(Object.values(binaryData))
+                const model = Model.fromBinary(bd).fork(sessionId);
+                console.log('Model successfully created:', model);
+                return model;
+            } catch (e) {
+                console.error('Error processing message:', e);
+            }
+        } else {
+            if (!modelRef.current) return;
+                
+            //const patchData = Uint8Array.from(Object.values(binaryData));
+            console.log('Binary data:', binaryData);
+            const patchData = decode(JSON.parse(binaryData));
+            try {
+                //const patch = Patch.patchData;
+                setModel(modelRef.current.applyPatch(patchData));
+                console.log("Applied patch to model");
+            } catch (error) {
+                console.error("Error applying patch:", error);
+            }
         }
     }
-}
 
     // when the app loads, create a new model from the server
     const WS_URL = 'ws://localhost:8000'
@@ -104,27 +167,27 @@ function App() {
                 const reader = new FileReader();
                 reader.onload = () => {
                     message = new Uint8Array(reader.result as ArrayBuffer);
-                    const model = processMessage(message);
+                    processMessage(message);
                 };
                 reader.readAsArrayBuffer(event.data);
-                return model;
+                return;
             } else if (typeof event.data === 'string') {
                 // Handle string data
                 try {
                     if (isFirstMessageRef.current) {
+                        console.log('First message model')
                         const parsed = JSON.parse(event.data);
                         message = new Uint8Array(Object.values(parsed));
-                        model = Model.fromBinary(message).fork(sessionId);
-                        setModel(model);
-                    } else {
-                        const parsed = JSON.parse(event.data);
-                        try {
-                            const patchData = decode(parsed);
-                            const patch = Patch.fromBinary(patchData);
-                            setModel(modelRef.current?.applyPatch(patch));
-                        } catch (e) {
-                            console.error('Failed to parse patch data:', e);
+                        if (!message) {
+                            message = decode(JSON.parse(event.data));
                         }
+                        setModel(modelRef.current?.applyPatch(message));
+                    } else {
+                        console.log('Not first message model - apply patch')
+                        const parsed = JSON.parse(event.data)
+                        const message = decode(parsed)
+                        console.log('message', message)
+                        modelRef.current?.applyPatch(message)
                     }
                     console.log('input string')
                     console.log(event.data)
@@ -135,15 +198,32 @@ function App() {
                 }
             } else {
                 // Assume it's already binary
-                message = new Uint8Array(event.data);
+                //message = new Uint8Array(event.data);
+                message = decode(JSON.parse(event.data));
             }
-            
-            setModel(processMessage(message));
+            console.log('ed.dec', decode(JSON.parse(event.data)))
+            console.log('ed.json', JSON.parse(event.data))
+            console.log('event.data', event.data)
+            console.log('message', message)
+            if (message) setModel(processMessage(message));
             console.log('model', model)
             console.log('message', message)
-            setSnapshot(getModel()?.api.getSnapshot());
+            console.log('snapshot', getModel()?.api.getSnapshot())
+            console.log('rows', getModel()?.api.getSnapshot().rows)
+            console.log('columnNames', getModel()?.api.getSnapshot().columnNames)
+            console.log('columnOrder', getModel()?.api.getSnapshot().columnOrder)
+            //setSnapshot(getModel()?.api.getSnapshot());
+            console.log('snapsho', snapshot)
+            //setGridRows(getModel()?.api.getSnapshot().rows);
+            //setGridColumns(getModel()?.api.getSnapshot().columnOrder);
+            //setPrevRows(getModel()?.api.getSnapshot().rows);
             console.log('Received message:', message);
             console.log('Updated model:', getModel()?.toString());
+            console.log('Updated model snapshot:', getModel()?.api.getSnapshot());
+            console.log('Updated model rows:', getModel()?.view());
+            console.log('rows', modelToGrid(getModel()));
+            setGridRows(modelToGrid(getModel()));
+            console.log('grid rows', gridRows);
             console.log('Snapshot:', snapshot ? snapshot : 'unloaded');
             isFirstMessageRef.current = false;
         },
@@ -153,7 +233,7 @@ function App() {
         },
         reconnectAttempts: 5,
         reconnectInterval: 1000,
-    })
+    },)
 
     const THROTTLE = 50;
     const sendJsonMessageThrottled = useRef(throttle(sendJsonMessage, THROTTLE));
@@ -161,9 +241,9 @@ function App() {
         sendJsonMessageThrottled.current(message);
     };
 
-    const [modelRows, setModelRows] = useState<[]>(snapshot.rows || {})
-    const [modelColumnNames, setModelColumnNames] = useState<[]>(snapshot.columnNames || {})
-    const [modelColumnOrder, setModelColumnOrder] = useState<[]>(snapshot.columnOrder || {})
+    const [modelRows, setModelRows] = useState<[]>(snapshot ? snapshot.rows : {})
+    const [modelColumnNames, setModelColumnNames] = useState<[]>(snapshot ? snapshot.columnNames : {})
+    const [modelColumnOrder, setModelColumnOrder] = useState<[]>(snapshot ? snapshot.columnOrder : {})
 
     const createdRowIds = useMemo(() => new Set(), [])
     const deletedRowIds = useMemo(() => new Set(), [])
@@ -183,7 +263,8 @@ function App() {
         setPrevRows(newData)
         setModel(gridToModel(newData, getModel()))
         const patch = getModel()?.api.flush()
-        const binaryData = patch?.toBinary();
+        let binaryData;
+        if (patch) binaryData = encode(patch);
         console.log('Binary data:', patch);
         sendThrottledJsonMessage(binaryData);
 
