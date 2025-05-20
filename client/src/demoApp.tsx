@@ -11,47 +11,124 @@ import './dataGridExtra.css'
 // Set a session ID for forking the model
 const sessionId = Math.floor(Math.random() * 1000000);
 
-function processMessage(binaryData) {
-    try {
-        const model = Model.fromBinary(binaryData);
-        console.log('Model successfully created:', model);
-        return model;
-    } catch (e) {
-        console.error('Error processing message:', e);
+function gridToModel(gridRows, model) {
+    const rows = gridRows.map(row => {
+        const { id, ...rest } = row;
+        return { id: Number(id), ...rest };
+    });
+    const columnNames = Object.keys(gridRows[0] || {});
+    const columnOrder = columnNames.map(name => ({ name }));
+    console.log('rows:', rows);
+    console.log('columnNames:', columnNames);
+    console.log('columnOrder:', columnOrder);
+    //return { rows, columnNames, columnOrder };
+    const cn = model.api.vec(['columnNames']);
+    const co = model.api.arr(['columnOrder']);
+    const rowsArr = model.api.arr(['rows']);
+    //const r0 = (rowsArr.get(0) as VecApi<any>);
+    //r0.set([[0, konst('edited value')]])
+    // Apply row changes
+    // First, update existing rows
+    console.log(gridRows,'gr')
+    const minLength = Math.min(rows.length, gridRows.length);
+    for (let i = 0; i < minLength; i++) {
+        const rowVec = rowsArr.get(i) as VecApi<any>;
+        const editedRow = gridRows[i];
+        // Update each cell in the row
+        Object.entries(editedRow).forEach(([key, value]) => {
+            const columnIndex = 0; // fix this later - lookup column index
+            console.log('columnIndex:', columnIndex);
+            if (!isNaN(columnIndex)) {
+                rowVec.set([[columnIndex, konst(value)]]);
+            }
+        });
     }
+    console.log('model Snapshot:', model.api.getSnapshot());
+    return model
 }
 
 function App() {
     // Create reactive values for rows and columns
-    const [gridRows, setGridRows] = useState<Record<string, any>[]>([{ id: 0, colOne: 'A'}]);
-    const [gridColumns, setGridColumns] = useState<Column[]>([{...keyColumn('colOne', textColumn), title: 'colOne'}]);
+    const [gridRows, setGridRows] = useState<Record<string, any>[]>([{ colOne: 'loaded value'}]);
+    const [gridColumns, setGridColumns] = useState<Column[]>([
+        //{...keyColumn('id', textColumn), title: 'id'},
+        {...keyColumn('colOne', textColumn), title: 'colOne'}
+    ]);
     const [prevRows, setPrevRows] = useState(gridRows)
+    const modelRef = useRef<Model | null>(null);
+    const getModel = () => modelRef.current;
+    const setModel = (newModel: any) => {
+        modelRef.current = newModel;
+    };
+    const isFirstMessageRef = useRef(true);
+    const [snapshot, setSnapshot] = useState<any>({rows: [], columnNames: [], columnOrder: []});
+
+    function processMessage(binaryData) {
+    if (isFirstMessageRef) {
+        try {
+            const model = Model.fromBinary(binaryData).fork(sessionId);
+            console.log('Model successfully created:', model);
+            return model;
+        } catch (e) {
+            console.error('Error processing message:', e);
+        }
+    } else {
+        if (!modelRef.current) return;
+            
+        const patchData = Uint8Array.from(Object.values(binaryData));
+        try {
+            const patch = Patch.fromBinary(patchData);
+            setModel(modelRef.current.applyPatch(patch));
+            console.log("Applied patch to model");
+        } catch (error) {
+            console.error("Error applying patch:", error);
+        }
+    }
+}
 
     // when the app loads, create a new model from the server
     const WS_URL = 'ws://localhost:8000'
-    const { sendJsonMessage, lastJsonMessage } = useWebSocket(WS_URL, {
+    const { sendJsonMessage } = useWebSocket(WS_URL, {
         onOpen: () => console.log('WebSocket connection opened'),
         onClose: () => console.log('WebSocket connection closed'),
         onError: (event) => console.error('WebSocket error:', event),
         onMessage: (event) => {
             console.log('Raw event data type:', typeof event.data);
             let message;
+            let model;
     
             // Handle different potential WebSocket data formats
             if (event.data instanceof Blob) {
+                console.log('input blob')
                 // Convert Blob to ArrayBuffer first
                 const reader = new FileReader();
                 reader.onload = () => {
                     message = new Uint8Array(reader.result as ArrayBuffer);
-                    processMessage(message);
+                    const model = processMessage(message);
                 };
                 reader.readAsArrayBuffer(event.data);
-                return;
+                return model;
             } else if (typeof event.data === 'string') {
                 // Handle string data
                 try {
-                    const parsed = JSON.parse(event.data);
-                    message = new Uint8Array(Object.values(parsed));
+                    if (isFirstMessageRef.current) {
+                        const parsed = JSON.parse(event.data);
+                        message = new Uint8Array(Object.values(parsed));
+                        model = Model.fromBinary(message).fork(sessionId);
+                        setModel(model);
+                    } else {
+                        const parsed = JSON.parse(event.data);
+                        try {
+                            const patchData = decode(parsed);
+                            const patch = Patch.fromBinary(patchData);
+                            setModel(modelRef.current?.applyPatch(patch));
+                        } catch (e) {
+                            console.error('Failed to parse patch data:', e);
+                        }
+                    }
+                    console.log('input string')
+                    console.log(event.data)
+                    
                 } catch (e) {
                     console.error('Failed to parse string data:', e);
                     return;
@@ -61,9 +138,14 @@ function App() {
                 message = new Uint8Array(event.data);
             }
             
-            const model = processMessage(message);
+            setModel(processMessage(message));
+            console.log('model', model)
+            console.log('message', message)
+            setSnapshot(getModel()?.api.getSnapshot());
             console.log('Received message:', message);
-            console.log('Updated model:', model.toString());
+            console.log('Updated model:', getModel()?.toString());
+            console.log('Snapshot:', snapshot ? snapshot : 'unloaded');
+            isFirstMessageRef.current = false;
         },
         shouldReconnect: (closeEvent) => {
             console.log('WebSocket closed. Reconnecting...', closeEvent)
@@ -72,6 +154,16 @@ function App() {
         reconnectAttempts: 5,
         reconnectInterval: 1000,
     })
+
+    const THROTTLE = 50;
+    const sendJsonMessageThrottled = useRef(throttle(sendJsonMessage, THROTTLE));
+    const sendThrottledJsonMessage = (message: any) => {
+        sendJsonMessageThrottled.current(message);
+    };
+
+    const [modelRows, setModelRows] = useState<[]>(snapshot.rows || {})
+    const [modelColumnNames, setModelColumnNames] = useState<[]>(snapshot.columnNames || {})
+    const [modelColumnOrder, setModelColumnOrder] = useState<[]>(snapshot.columnOrder || {})
 
     const createdRowIds = useMemo(() => new Set(), [])
     const deletedRowIds = useMemo(() => new Set(), [])
@@ -89,6 +181,11 @@ function App() {
         const newData = gridRows.filter(({ id }) => !deletedRowIds.has(id))
         setGridRows(newData)
         setPrevRows(newData)
+        setModel(gridToModel(newData, getModel()))
+        const patch = getModel()?.api.flush()
+        const binaryData = patch?.toBinary();
+        console.log('Binary data:', patch);
+        sendThrottledJsonMessage(binaryData);
 
         createdRowIds.clear()
         deletedRowIds.clear()
