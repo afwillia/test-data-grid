@@ -16,35 +16,55 @@ function gridToModel(gridRows, model) {
         const { ...rest } = row;
         return { ...rest };
     });
-    console.log('rows', rows)
+    //('rows', rows)
+    console.log('gridToRow rows: ', rows)
+    console.log('gridToRows columns: ', gridRows[0])
     const columnNames = Object.keys(gridRows[0] || {});
+    console.log('gridToRows columnNames: ', columnNames)
     const columnOrder = columnNames.map(name => ({ name }));
-    console.log('rows:', rows);
-    console.log('columnNames:', columnNames);
-    console.log('columnOrder:', columnOrder);
+    //console.log('rows:', rows);
+    //console.log('columnNames:', columnNames);
+    //console.log('columnOrder:', columnOrder);
     //return { rows, columnNames, columnOrder };
     const cn = model.api.vec(['columnNames']);
     const co = model.api.arr(['columnOrder']);
     const rowsArr = model.api.arr(['rows']);
+    const { columnNames: mcn, columnOrder: mco } = model.api.getSnapshot();
+
+    // add columns to model
+    cn.set([[0, model.api.builder.val()]])
+    cn.set([[0,konst('colOne')]]);
+    co.ins(0, [konst(0)]); // change columnOrder
+    co.del(1, 4)
+    cn.set([[1, model.api.builder.val()]])
+    cn.set([[1,konst('id')]]);
+    co.ins(1, [konst(1)]); // change columnOrder
+
     //const r0 = (rowsArr.get(0) as VecApi<any>);
     //r0.set([[0, konst('edited value')]])
     // Apply row changes
     // First, update existing rows
-    console.log(gridRows,'gr')
+    //console.log(gridRows,'gr')
     const minLength = Math.min(rows.length, gridRows.length);
     for (let i = 0; i < minLength; i++) {
         const rowVec = rowsArr.get(i) as VecApi<any>;
         const editedRow = gridRows[i];
         // Update each cell in the row
         Object.entries(editedRow).forEach(([key, value]) => {
-            const columnIndex = 0; // fix this later - lookup column index
+            console.log('key:', key);
+            console.log('value:', value);
+            console.log('mcn: ', mcn);
+            console.log('mco: ', mco);
+            const columnIndex = mcn.indexOf(key);
+            //console.log('columnIndex:', columnIndex);
             console.log('columnIndex:', columnIndex);
             if (!isNaN(columnIndex)) {
+                console.log('Updating row:', i, 'column:', mcn[columnIndex], 'index: ', columnIndex, 'value:', value);
                 rowVec.set([[columnIndex, konst(value)]]);
             }
         });
     }
-    console.log('model Snapshot:', model.api.getSnapshot());
+    //console.log('model Snapshot:', model.api.getSnapshot());
     return model
 }
 
@@ -52,19 +72,28 @@ function modelToGrid(model) {
     const rows = model.api.getSnapshot().rows;
     const columnNames = model.api.getSnapshot().columnNames;
     const columnOrder = model.api.getSnapshot().columnOrder;
-    console.log('row converted:', rows);
-    console.log('columnNames:', columnNames);
-    console.log('columnOrder:', columnOrder);
+    //console.log('row converted:', rows);
+    //console.log('columnNames:', columnNames);
+    //console.log('columnOrder:', columnOrder);
     // convert rows to grid format
     const gridRows = rows.map(row => {
-        console.log('row:', row);
-        const { id, ...rest } = row;
-        return [{'colOne': 'bobobbo'}];
+        const rowObj = {};
+        // Use columnOrder to determine which columnNames to use and in what order
+        columnOrder.forEach((index, i) => {
+            if (columnNames[index]) {
+                rowObj[columnNames[index]] = row[index];
+            }
+        });
+        return rowObj;
     }
     );
-    console.log('gridRows:', gridRows);
-    return [{'colOne': rows}];
-    //return gridRows.map(row => {
+    //console.log('gridRows:', gridRows);
+    console.log('columnNames: ', columnNames)
+    console.log('columnOrder: ', columnOrder)
+    console.log('rows: ', rows)
+    //return [{'colOne': rows}];
+    console.log('gridRows:', gridRows)
+    return gridRows
 }
 
 function App() {
@@ -87,8 +116,8 @@ function App() {
     });
         // Create reactive values for rows and columns
     const [gridColumns, setGridColumns] = useState<Column[]>([
-        //{...keyColumn('id', textColumn), title: 'id'},
-        {...keyColumn('colOne', textColumn), title: 'colOne'}
+        {...keyColumn('colOne', textColumn), title: 'colOne'},
+        {...keyColumn('id', textColumn), title: 'id'}
     ]);
     const [prevRows, setPrevRows] = useState(gridRows)
 
@@ -106,10 +135,10 @@ function App() {
             setSnapshot(modelRef.current?.api.getSnapshot());
             console.log("Snapshot:", modelRef.current?.api.getSnapshot());
             setGridRows(modelToGrid(modelRef.current));
-            setGridColumns(
-                (modelRef.current?.api.getSnapshot().columnNames || [])
-                .map((name, i) => ({...keyColumn(name, textColumn), title: name}))
-            );
+            // setGridColumns(
+            //     (modelRef.current?.api.getSnapshot().columnNames || [])
+            //     .map((name, i) => ({...keyColumn(name, textColumn), title: name}))
+            // );
             setPrevRows(modelRef.current?.api.getSnapshot().rows || []);
         });
         
@@ -128,7 +157,7 @@ function App() {
             try {
                 const bd = Uint8Array.from(Object.values(binaryData))
                 const model = Model.fromBinary(bd).fork(sessionId);
-                console.log('Model successfully created:', model);
+                console.log('Model successfully created:', model.view());
                 return model;
             } catch (e) {
                 console.error('Error processing message:', e);
@@ -137,7 +166,7 @@ function App() {
             if (!modelRef.current) return;
                 
             //const patchData = Uint8Array.from(Object.values(binaryData));
-            console.log('Binary data:', binaryData);
+            //console.log('Binary data:', binaryData);
             const patchData = decode(JSON.parse(binaryData));
             try {
                 //const patch = Patch.patchData;
@@ -201,30 +230,30 @@ function App() {
                 //message = new Uint8Array(event.data);
                 message = decode(JSON.parse(event.data));
             }
-            console.log('ed.dec', decode(JSON.parse(event.data)))
-            console.log('ed.json', JSON.parse(event.data))
-            console.log('event.data', event.data)
-            console.log('message', message)
+            //console.log('ed.dec', decode(JSON.parse(event.data)))
+            //console.log('ed.json', JSON.parse(event.data))
+            //console.log('event.data', event.data)
+            //console.log('message', message)
             if (message) setModel(processMessage(message));
-            console.log('model', model)
-            console.log('message', message)
+            //console.log('model', model)
+            //console.log('message', message)
             console.log('snapshot', getModel()?.api.getSnapshot())
-            console.log('rows', getModel()?.api.getSnapshot().rows)
-            console.log('columnNames', getModel()?.api.getSnapshot().columnNames)
-            console.log('columnOrder', getModel()?.api.getSnapshot().columnOrder)
+            //console.log('rows', getModel()?.api.getSnapshot().rows)
+            //console.log('columnNames', getModel()?.api.getSnapshot().columnNames)
+            //console.log('columnOrder', getModel()?.api.getSnapshot().columnOrder)
             //setSnapshot(getModel()?.api.getSnapshot());
-            console.log('snapsho', snapshot)
+            //console.log('snapsho', snapshot)
             //setGridRows(getModel()?.api.getSnapshot().rows);
             //setGridColumns(getModel()?.api.getSnapshot().columnOrder);
             //setPrevRows(getModel()?.api.getSnapshot().rows);
             console.log('Received message:', message);
-            console.log('Updated model:', getModel()?.toString());
+            //console.log('Updated model:', getModel()?.toString());
             console.log('Updated model snapshot:', getModel()?.api.getSnapshot());
-            console.log('Updated model rows:', getModel()?.view());
-            console.log('rows', modelToGrid(getModel()));
+            //console.log('Updated model rows:', getModel()?.view());
+            //console.log('rows', modelToGrid(getModel()));
             setGridRows(modelToGrid(getModel()));
-            console.log('grid rows', gridRows);
-            console.log('Snapshot:', snapshot ? snapshot : 'unloaded');
+            //console.log('grid rows', gridRows);
+            //console.log('Snapshot:', snapshot ? snapshot : 'unloaded');
             isFirstMessageRef.current = false;
         },
         shouldReconnect: (closeEvent) => {
@@ -265,7 +294,7 @@ function App() {
         const patch = getModel()?.api.flush()
         let binaryData;
         if (patch) binaryData = encode(patch);
-        console.log('Binary data:', patch);
+        console.log('Patch data upload:', patch);
         sendThrottledJsonMessage(binaryData);
 
         createdRowIds.clear()
