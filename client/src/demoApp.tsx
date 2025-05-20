@@ -13,15 +13,18 @@ const sessionId = Math.floor(Math.random() * 1000000);
 
 function gridToModel(gridRows, model) {
     const rows = gridRows.map(row => {
+        
         const { ...rest } = row;
+        console.log('rest:', row, 'row')
         return { ...rest };
     });
     //('rows', rows)
     console.log('gridToRow rows: ', rows)
     console.log('gridToRows columns: ', gridRows[0])
-    const columnNames = Object.keys(gridRows[0] || {});
+    const { columnNames: mcn, columnOrder: mco } = model.api.getSnapshot();
+    const columnNames = mcn[mco] || {};
     console.log('gridToRows columnNames: ', columnNames)
-    const columnOrder = columnNames.map(name => ({ name }));
+    //const columnOrder = columnNames.map(name => ({ name }));
     //console.log('rows:', rows);
     //console.log('columnNames:', columnNames);
     //console.log('columnOrder:', columnOrder);
@@ -29,37 +32,64 @@ function gridToModel(gridRows, model) {
     const cn = model.api.vec(['columnNames']);
     const co = model.api.arr(['columnOrder']);
     const rowsArr = model.api.arr(['rows']);
-    const { columnNames: mcn, columnOrder: mco } = model.api.getSnapshot();
+    
 
     // add columns to model
     cn.set([[0, model.api.builder.val()]])
     cn.set([[0,konst('colOne')]]);
     co.ins(0, [konst(0)]); // change columnOrder
-    co.del(1, 4)
     cn.set([[1, model.api.builder.val()]])
     cn.set([[1,konst('id')]]);
     co.ins(1, [konst(1)]); // change columnOrder
+    co.del(2, 4)
+
+    const { columnNames: mcnUpdate, columnOrder: mcoUpdate } = model.api.getSnapshot();
 
     //const r0 = (rowsArr.get(0) as VecApi<any>);
     //r0.set([[0, konst('edited value')]])
     // Apply row changes
     // First, update existing rows
     //console.log(gridRows,'gr')
+    console.log('rl:', rows.length)
     const minLength = Math.min(rows.length, gridRows.length);
     for (let i = 0; i < minLength; i++) {
-        const rowVec = rowsArr.get(i) as VecApi<any>;
+        console.log('i', i)
+        //let rowVec: VecApi<any>
+        
+        // Check if row exists at index i before trying to get it
+        console.log('rowsArr length:', rowsArr.length());
+        const rowExists = i < rowsArr.length();
+        
+        if (!rowExists) {
+            console.log('Adding a new row at index', i);
+            rowsArr.ins(i, [model.api.builder.vec()]);
+        }
+        
         const editedRow = gridRows[i];
+        console.log('editedRow:', editedRow);
+        const rowVec = (rowsArr.get(i) as VecApi<any>);
         // Update each cell in the row
+        // Create a new row with values in the order of mcoUpdate
+        const newRow = Array(editedRow.length).fill(null);
+        for (let j = 0; j < mcoUpdate.length; j++) {
+            const columnName = mcnUpdate[mcoUpdate[j]];
+            if (columnName && editedRow[columnName] !== undefined) {
+                newRow[j] = [mcoUpdate[j], konst(editedRow[columnName])];
+            }
+        }
+        console.log('outRows:', newRow)
+        //rowVec.set([[i, konst(newRow)]]);
         Object.entries(editedRow).forEach(([key, value]) => {
-            console.log('key:', key);
-            console.log('value:', value);
-            console.log('mcn: ', mcn);
-            console.log('mco: ', mco);
-            const columnIndex = mcn.indexOf(key);
+            console.log('key:', key, value);
+            // console.log('key:', key);
+            // console.log('value:', value);
+            // console.log('mcn: ', mcn);
+            // console.log('mco: ', mco);
+            const columnIndex = mcnUpdate.indexOf(key);
             //console.log('columnIndex:', columnIndex);
             console.log('columnIndex:', columnIndex);
             if (!isNaN(columnIndex)) {
-                console.log('Updating row:', i, 'column:', mcn[columnIndex], 'index: ', columnIndex, 'value:', value);
+                console.log('Updating row:', i, 'column:', mcnUpdate[columnIndex], 'index: ', columnIndex, 'value:', value);
                 rowVec.set([[columnIndex, konst(value)]]);
             }
         });
@@ -72,7 +102,7 @@ function modelToGrid(model) {
     const rows = model.api.getSnapshot().rows;
     const columnNames = model.api.getSnapshot().columnNames;
     const columnOrder = model.api.getSnapshot().columnOrder;
-    //console.log('row converted:', rows);
+    console.log('row converted:', rows);
     //console.log('columnNames:', columnNames);
     //console.log('columnOrder:', columnOrder);
     // convert rows to grid format
@@ -100,7 +130,7 @@ function App() {
 
     const modelRef = useRef<Model | null>(null);
     const getModel = () => modelRef.current;
-        const setModel = (newModel: any) => {
+    const setModel = (newModel: any) => {
         if (newModel !== modelRef.current) {
             console.log("Setting new model");
             modelRef.current = newModel;
@@ -112,7 +142,7 @@ function App() {
     const [modelVersion, setModelVersion] = useState(0);
         const [gridRows, setGridRows] = useState<Record<string, any>[]>(() => {
         const initialSnapshot = modelRef.current?.api?.getSnapshot();
-        return initialSnapshot?.rows?.length ? modelToGrid(initialSnapshot) : [{ colOne: null }];
+        return initialSnapshot?.rows?.length ? modelToGrid(modelRef.current) : [{ colOne: null }];
     });
         // Create reactive values for rows and columns
     const [gridColumns, setGridColumns] = useState<Column[]>([
@@ -287,7 +317,9 @@ function App() {
 
     const commit = () => {
         /* Perform insert, update, and delete to the database here */
+        console.log('Grid data:', gridRows);
         const newData = gridRows.filter(({ id }) => !deletedRowIds.has(id))
+        console.log('New data:', newData);
         setGridRows(newData)
         setPrevRows(newData)
         setModel(gridToModel(newData, getModel()))
@@ -303,12 +335,7 @@ function App() {
     }
 
     function genId() {
-        const existingIds = new Set(gridRows.map(row => Number(row.id)));
-        let nextId = 0;
-        while (existingIds.has(nextId)) {
-            nextId++;
-        }
-        return nextId;
+        return Math.floor(Math.random() * 1000000);
     }
 
     return (
