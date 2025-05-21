@@ -9,20 +9,20 @@ import 'react-datasheet-grid/dist/style.css'
 import './dataGridExtra.css'
 
 // Set a session ID for forking the model
-const sessionId = Math.floor(Math.random() * 1000000);
+const sessionId = Math.floor(Math.random() * 10000);
 
 function gridToModel(gridRows, model) {
     const rows = gridRows.map(row => {
         const { ...rest } = row;
-        console.log('rest:', row, 'row');
+        //console.log('rest:', row, 'row');
         return { ...rest };
     });
-    console.log('gridToRow rows: ', rows);
-    console.log('gridToRows columns: ', gridRows[0]);
+    //console.log('gridToRow rows: ', rows);
+    //console.log('gridToRows columns: ', gridRows[0]);
     
     const { columnNames: mcn, columnOrder: mco, rows: currentRows } = model.api.getSnapshot();
     const columnNames = mcn[mco] || {};
-    console.log('gridToRows columnNames: ', columnNames);
+    //console.log('gridToRows columnNames: ', columnNames);
     
     const cn = model.api.vec(['columnNames']);
     const co = model.api.arr(['columnOrder']);
@@ -44,7 +44,7 @@ function gridToModel(gridRows, model) {
     if (currentRowCount > gridRows.length) {
         // Delete rows from the end
         for (let i = currentRowCount - 1; i >= gridRows.length; i--) {
-            console.log('Deleting row at index', i);
+            //console.log('Deleting row at index', i);
             rowsArr.del(i, i + 1);
         }
     }
@@ -53,25 +53,25 @@ function gridToModel(gridRows, model) {
     // Update existing rows and add new ones
     for (let i = 0; i < gridRows.length; i++) {
         // Check if row exists at index i before trying to get it
-        console.log('rowsArr length:', rowsArr.length());
+        //console.log('rowsArr length:', rowsArr.length());
         const rowExists = i < rowsArr.length();
         
         if (!rowExists) {
-            console.log('Adding a new row at index', i);
+            //console.log('Adding a new row at index', i);
             rowsArr.ins(i, [model.api.builder.vec()]);
         }
         
         const editedRow = gridRows[i];
-        console.log('editedRow:', editedRow);
+        //console.log('editedRow:', editedRow);
         const rowVec = (rowsArr.get(i) as VecApi<any>);
         
         // Update each cell in the row
         Object.entries(editedRow).forEach(([key, value]) => {
-            console.log('key:', key, value);
+            //console.log('key:', key, value);
             const columnIndex = mcnUpdate.indexOf(key);
-            console.log('columnIndex:', columnIndex);
+            //console.log('columnIndex:', columnIndex);
             if (!isNaN(columnIndex)) {
-                console.log('Updating row:', i, 'column:', mcnUpdate[columnIndex], 'index: ', columnIndex, 'value:', value);
+                //console.log('Updating row:', i, 'column:', mcnUpdate[columnIndex], 'index: ', columnIndex, 'value:', value);
                 rowVec.set([[columnIndex, konst(value)]]);
             }
         });
@@ -84,7 +84,7 @@ function modelToGrid(model) {
     const rows = model.api.getSnapshot().rows;
     const columnNames = model.api.getSnapshot().columnNames;
     const columnOrder = model.api.getSnapshot().columnOrder;
-    console.log('row converted:', rows);
+    //console.log('row converted:', rows);
     // convert rows to grid format
     const gridRows = rows.map(row => {
         const rowObj = {};
@@ -97,26 +97,49 @@ function modelToGrid(model) {
         return rowObj;
     }
     );
-    console.log('columnNames: ', columnNames)
-    console.log('columnOrder: ', columnOrder)
-    console.log('rows: ', rows)
+    //console.log('columnNames: ', columnNames)
+    //console.log('columnOrder: ', columnOrder)
+    //console.log('rows: ', rows)
     //return [{'colOne': rows}];
-    console.log('gridRows:', gridRows)
+    //console.log('gridRows:', gridRows)
     return gridRows
 }
 
 function App() {
 
     const modelRef = useRef<Model | null>(null);
+    const latestSnapshotRef = useRef<any>({rows: [], columnNames: [], columnOrder: []});
     const getModel = () => modelRef.current;
     const setModel = (newModel: any) => {
-        if (newModel !== modelRef.current) {
-            console.log("Setting new model");
-            modelRef.current = newModel;
-            // Force the effect to run by updating a state variable
-            setModelVersion(prev => prev + 1);
+      if (newModel !== modelRef.current) {
+        //console.log("Setting new model");
+        modelRef.current = newModel;
+        
+        // Immediately compute and store the latest snapshot
+        if (modelRef.current?.api) {
+          const freshSnapshot = modelRef.current.api.getSnapshot();
+          latestSnapshotRef.current = freshSnapshot;
+          
+          // Check if rows have actually changed before updating state
+          if (!areRowsEqual(snapshot.rows, freshSnapshot.rows)) {
+            setSnapshot(freshSnapshot);
+          }
         }
+        
+        // Force the effect to run by updating version
+        setModelVersion(prev => prev + 1);
+      }
     };
+    
+    // Helper function to compare rows deeply
+    function areRowsEqual(prevRows: any[], nextRows: any[]): boolean {
+      if (!prevRows || !nextRows) return false;
+      if (prevRows.length !== nextRows.length) return false;
+      
+      // Quick basic comparison - change this if you need deeper comparison
+      return JSON.stringify(prevRows) === JSON.stringify(nextRows);
+    }
+
     const [snapshot, setSnapshot] = useState<any>([{rows: [], columnNames: [], columnOrder: []}]);
     const [modelVersion, setModelVersion] = useState(0);
         const [gridRows, setGridRows] = useState<Record<string, any>[]>(() => {
@@ -131,98 +154,123 @@ function App() {
     const [prevRows, setPrevRows] = useState(gridRows)
 
     const isFirstMessageRef = useRef(true);
-
-    useEffect(() => {
-        if (!modelRef.current || !modelRef.current.api) return;
-        
-        // Set initial snapshot
-        setSnapshot(modelRef.current.api.getSnapshot());
-        // Update grid rows immediately when model is set
-        setGridRows(modelToGrid(modelRef.current));
-        
-        // Subscribe to model changes
-        const unsubscribe = modelRef.current.api.subscribe(() => {
-            console.log("Model changed - updating snapshot");
-            setSnapshot(modelRef.current?.api.getSnapshot());
-            // Update grid rows whenever model changes
-            setGridRows(modelToGrid(modelRef.current));
-            setPrevRows(modelRef.current?.api.getSnapshot().rows || []);
-        });
-        
-        // Clean up subscription when component unmounts or model changes
-        return () => {
-            console.log("Cleaning up model subscription");
-            unsubscribe();
-        };
-    }, [modelRef.current]); // Re-run when modelRef.current changes
     
-
     function processMessage(binaryData) {
-        console.log('Processing message:', binaryData);
+        //console.log('Processing message:', binaryData);
         if (isFirstMessageRef.current) {
             try {
                 const bd = Uint8Array.from(Object.values(binaryData));
                 const model = Model.fromBinary(bd).fork(sessionId);
                 console.log('Model successfully created:', model.view());
+                setModel(model);
+                setSnapshot(model.api.getSnapshot());
+                setGridRows(modelToGrid(model));
                 return model;
             } catch (e) {
                 console.error('Error creating model from binary data:', e);
                 return null;
             }
+        } else {
+            getModel()?.applyPatch(decode(binaryData));
+            console.log('Model successfully updated:', getModel()?.api.getSnapshot());
+            setModel(getModel());
+            setSnapshot(getModel()?.api.getSnapshot());
+            setGridRows(modelToGrid(getModel()));
+            //console.log('Model successfully updated:', getModel()?.view());
+            console.log('Snapshot and rows updated')
+            return getModel();
         }
         return null;
     }
 
     // when the app loads, create a new model from the server
     const WS_URL = 'ws://localhost:8000'
-    const { sendJsonMessage } = useWebSocket(WS_URL, {
+    const { sendJsonMessage, lastJsonMessage } = useWebSocket(WS_URL, {
         onOpen: () => console.log('WebSocket connection opened'),
         onClose: () => console.log('WebSocket connection closed'),
         onError: (event) => console.error('WebSocket error:', event),
         onMessage: (event) => {
             console.log('Raw event data type:', typeof event.data);
             let message;
-    
+
             try {
                 if (event.data instanceof Blob) {
                     console.log('Received blob data');
-                    // Convert Blob to ArrayBuffer first
                     const reader = new FileReader();
                     reader.onload = () => {
                         const arrayBuffer = reader.result as ArrayBuffer;
                         message = new Uint8Array(arrayBuffer);
                         const updatedModel = processMessage(message);
+                        console.log('Updated model :', updatedModel);
+                        console.log('message: ', message);
+                        
                         if (updatedModel) {
+                          // Get snapshot before setting model
+                          const newSnapshot = updatedModel.api.getSnapshot();
+                          console.log('newSnapshot: ', newSnapshot);
+                          
+                          // Only update if rows have changed
+                          console.log('latest: ', latestSnapshotRef.current.rows);
+                          console.log('new:', newSnapshot.rows);
+                          if (!areRowsEqual(latestSnapshotRef.current.rows, newSnapshot.rows)) {
                             setModel(updatedModel);
-                            // Update grid rows based on new model
+                            latestSnapshotRef.current = newSnapshot;
+                            setSnapshot(newSnapshot);
                             setGridRows(modelToGrid(updatedModel));
+                            console.log('model, snapshot, and grid updated')
+                          } else {
+                            // Still update the model but don't trigger re-renders
+                            modelRef.current = updatedModel;
+                          }
                         }
                     };
                     reader.readAsArrayBuffer(event.data);
+
+                    console.log('Blob data processed');
                     return;
                 } else if (typeof event.data === 'string') {
-                    console.log('Received string data');
+                    //console.log('Received string data:', event.data);
                     const parsed = JSON.parse(event.data);
                     
                     if (isFirstMessageRef.current) {
                         // First message - create a new model
                         message = new Uint8Array(Object.values(parsed));
                         const updatedModel = processMessage(message);
+                        console.log('Updated model:', updatedModel?.api.getSnapshot);
                         if (updatedModel) {
-                            setModel(updatedModel);
-                            setGridRows(modelToGrid(updatedModel));
-                            isFirstMessageRef.current = false;
+                          const initialSnapshot = updatedModel.api.getSnapshot();
+                          latestSnapshotRef.current = initialSnapshot;
+                          setSnapshot(initialSnapshot);
+                          setModel(updatedModel);
+                          setGridRows(modelToGrid(updatedModel));
+                          isFirstMessageRef.current = false;
                         }
                     } else {
                         // Subsequent messages - apply patch to existing model
                         if (!modelRef.current) return;
                         
                         try {
+                            // Store the snapshot before applying the patch
+                            const beforeSnapshot = modelRef.current.api.getSnapshot();
+                            
+                            // Apply the patch
                             const patchData = decode(parsed);
                             modelRef.current.applyPatch(patchData);
-                            console.log("Applied patch to model");
-                            // Update the UI after applying patch
+                            //console.log("Applied patch to model");
+                            
+                            // Get the snapshot after applying the patch
+                            const afterSnapshot = modelRef.current.api.getSnapshot();
+                            latestSnapshotRef.current = afterSnapshot;
+                            setSnapshot(afterSnapshot);
+                            // Always update gridRows, even if rows are "equal"
                             setGridRows(modelToGrid(modelRef.current));
+                                                        
+                            // Only update UI if rows changed
+                            if (!areRowsEqual(beforeSnapshot.rows, afterSnapshot.rows)) {
+                              setSnapshot(afterSnapshot);
+                              setGridRows(modelToGrid(modelRef.current));
+                              setPrevRows(afterSnapshot.rows || []);
+                            }
                         } catch (error) {
                             console.error("Error applying patch:", error);
                         }
@@ -233,12 +281,52 @@ function App() {
             }
         },
         shouldReconnect: (closeEvent) => {
-            console.log('WebSocket closed. Reconnecting...', closeEvent)
+            //console.log('WebSocket closed. Reconnecting...', closeEvent)
             return true
         },
         reconnectAttempts: 5,
         reconnectInterval: 1000,
     },)
+
+    useEffect(() => {
+        if (!modelRef.current || !modelRef.current.api) return;
+        
+        // Get fresh snapshot
+        const currentSnapshot = modelRef.current.api.getSnapshot();
+        latestSnapshotRef.current = currentSnapshot;
+        
+        // Only update state if rows are different
+        //if (!areRowsEqual(snapshot.rows, currentSnapshot.rows)) {
+            setSnapshot(currentSnapshot);
+            setGridRows(modelToGrid(modelRef.current));
+       // }
+        
+        // Subscribe to model changes with row equality check
+        const unsubscribe = modelRef.current.api.subscribe(() => {
+            //console.log("Model changed - checking if rows changed");
+            const newSnapshot = modelRef.current?.api.getSnapshot();
+            if (newSnapshot) {
+               latestSnapshotRef.current = newSnapshot;
+               setSnapshot(newSnapshot);
+               setGridRows(modelToGrid(modelRef.current));
+              
+              // Only trigger UI updates if rows actually changed
+              if (!areRowsEqual(snapshot.rows, newSnapshot.rows)) {
+                //console.log("Rows changed - updating UI");
+                setSnapshot(newSnapshot);
+                setGridRows(modelToGrid(modelRef.current));
+                setPrevRows(newSnapshot.rows || []);
+              } else {
+                //console.log("Model changed but rows unchanged - skipping render");
+              }
+            }
+        });
+        
+        return () => {
+            //console.log("Cleaning up model subscription");
+            unsubscribe();
+        };
+    }, [modelRef.current]); // Re-run when modelRef.current changes
 
     const THROTTLE = 50;
     const sendJsonMessageThrottled = useRef(throttle(sendJsonMessage, THROTTLE));
@@ -263,16 +351,16 @@ function App() {
 
     const commit = () => {
         /* Perform insert, update, and delete to the database here */
-        console.log('Grid data:', gridRows);
+        //console.log('Grid data:', gridRows);
         const newData = gridRows.filter(({ id }) => !deletedRowIds.has(id))
-        console.log('New data:', newData);
+        //console.log('New data:', newData);
         setGridRows(newData)
         setPrevRows(newData)
         setModel(gridToModel(newData, getModel()))
         const patch = getModel()?.api.flush()
         let binaryData;
         if (patch) binaryData = encode(patch);
-        console.log('Patch data upload:', patch);
+        //console.log('Patch data upload:', patch);
         sendThrottledJsonMessage(binaryData);
 
         createdRowIds.clear()
