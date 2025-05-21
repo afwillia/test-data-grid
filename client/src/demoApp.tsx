@@ -14,38 +14,44 @@ const sessionId = Math.floor(Math.random() * 1000000);
 function gridToModel(gridRows, model) {
     const rows = gridRows.map(row => {
         const { ...rest } = row;
-        console.log('rest:', row, 'row')
+        console.log('rest:', row, 'row');
         return { ...rest };
     });
-    console.log('gridToRow rows: ', rows)
-    console.log('gridToRows columns: ', gridRows[0])
-    const { columnNames: mcn, columnOrder: mco } = model.api.getSnapshot();
+    console.log('gridToRow rows: ', rows);
+    console.log('gridToRows columns: ', gridRows[0]);
+    
+    const { columnNames: mcn, columnOrder: mco, rows: currentRows } = model.api.getSnapshot();
     const columnNames = mcn[mco] || {};
-    console.log('gridToRows columnNames: ', columnNames)
+    console.log('gridToRows columnNames: ', columnNames);
+    
     const cn = model.api.vec(['columnNames']);
     const co = model.api.arr(['columnOrder']);
     const rowsArr = model.api.arr(['rows']);
-    
 
     // add columns to model
-    cn.set([[0, model.api.builder.val()]])
-    cn.set([[0,konst('colOne')]]);
+    cn.set([[0, model.api.builder.val()]]);
+    cn.set([[0, konst('colOne')]]);
     co.ins(0, [konst(0)]); // change columnOrder
-    cn.set([[1, model.api.builder.val()]])
-    cn.set([[1,konst('id')]]);
+    cn.set([[1, model.api.builder.val()]]);
+    cn.set([[1, konst('id')]]);
     co.ins(1, [konst(1)]); // change columnOrder
-    co.del(2, 4)
+    co.del(2, 4);
 
     const { columnNames: mcnUpdate, columnOrder: mcoUpdate } = model.api.getSnapshot();
 
+    // Delete rows that are no longer in gridRows
+    const currentRowCount = rowsArr.length();
+    if (currentRowCount > gridRows.length) {
+        // Delete rows from the end
+        for (let i = currentRowCount - 1; i >= gridRows.length; i--) {
+            console.log('Deleting row at index', i);
+            rowsArr.del(i, i + 1);
+        }
+    }
+
     // Apply row changes
-    // First, update existing rows
-    console.log('rl:', rows.length)
-    const minLength = Math.min(rows.length, gridRows.length);
-    for (let i = 0; i < minLength; i++) {
-        console.log('i', i)
-        //let rowVec: VecApi<any>
-        
+    // Update existing rows and add new ones
+    for (let i = 0; i < gridRows.length; i++) {
         // Check if row exists at index i before trying to get it
         console.log('rowsArr length:', rowsArr.length());
         const rowExists = i < rowsArr.length();
@@ -58,17 +64,8 @@ function gridToModel(gridRows, model) {
         const editedRow = gridRows[i];
         console.log('editedRow:', editedRow);
         const rowVec = (rowsArr.get(i) as VecApi<any>);
+        
         // Update each cell in the row
-        // Create a new row with values in the order of mcoUpdate
-        const newRow = Array(editedRow.length).fill(null);
-        for (let j = 0; j < mcoUpdate.length; j++) {
-            const columnName = mcnUpdate[mcoUpdate[j]];
-            if (columnName && editedRow[columnName] !== undefined) {
-                newRow[j] = [mcoUpdate[j], konst(editedRow[columnName])];
-            }
-        }
-        console.log('outRows:', newRow)
-        //rowVec.set([[i, konst(newRow)]]);
         Object.entries(editedRow).forEach(([key, value]) => {
             console.log('key:', key, value);
             const columnIndex = mcnUpdate.indexOf(key);
@@ -79,7 +76,8 @@ function gridToModel(gridRows, model) {
             }
         });
     }
-    return model
+    
+    return model;
 }
 
 function modelToGrid(model) {
