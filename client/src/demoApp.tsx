@@ -11,7 +11,6 @@ import './dataGridExtra.css'
 // Set a session ID for forking the model
 const sessionId = Math.floor(Math.random() * 10000);
 
-
 function forkModel(model, sessionId) {
     const forkedModel = model.fork(sessionId);
     return forkedModel;
@@ -200,7 +199,6 @@ function App() {
             console.log('Snapshot and rows updated')
             return getModel();
         }
-        return null;
     }
 
     function updateUIFromModel(model) {
