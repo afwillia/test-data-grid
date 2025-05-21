@@ -48,6 +48,18 @@ const broadcast = (model) => {
   }
 }
 
+const broadcastPatch = (patchMsg) => {
+  console.log('received patch: ', patchMsg)
+  const patch = decode(JSON.parse(patchMsg))
+  console.log('decoded patch: ', patch)
+  Object.keys(connections).forEach(uuid => {
+    const connection = connections[uuid]
+    connection.send(JSON.stringify(encode(patch)))
+  })
+  console.log('broadcasted patch')
+  return
+}
+
 const handleMessage = (bytes, model, uuid) => {
   console.log(`bytes: ${bytes}`)
   let newPatch;
@@ -62,7 +74,8 @@ const handleMessage = (bytes, model, uuid) => {
     return model
   }
   console.log('model snapshot: ', model.api.getSnapshot())
-  broadcast(model)
+  //broadcast(model)
+  broadcastPatch(bytes)
   return model
 }
 
