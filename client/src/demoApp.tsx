@@ -342,6 +342,18 @@ function App() {
         return Math.floor(Math.random() * 1000000);
     }
 
+    const autoCommitRef = useRef(throttle((newValue) => {
+        console.log('Auto-committing changes');
+        const updatedModel = gridToModel(newValue, getModel());
+        setModel(updatedModel);
+        
+        const patch = updatedModel?.api.flush();
+        if (patch) {
+            const binaryData = encode(patch);
+            sendJsonMessage(binaryData);
+        }
+    }, 500));
+
     return (
         <div>
             <h1>JSON CRDT Grid Demo</h1>
@@ -410,6 +422,8 @@ function App() {
                         }
 
                         setGridRows(newValue)
+
+                        autoCommitRef.current(newValue);
       }}
                 />
             </div>
