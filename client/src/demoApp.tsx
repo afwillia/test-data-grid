@@ -137,17 +137,15 @@ function App() {
         
         // Set initial snapshot
         setSnapshot(modelRef.current.api.getSnapshot());
+        // Update grid rows immediately when model is set
+        setGridRows(modelToGrid(modelRef.current));
         
         // Subscribe to model changes
         const unsubscribe = modelRef.current.api.subscribe(() => {
             console.log("Model changed - updating snapshot");
             setSnapshot(modelRef.current?.api.getSnapshot());
-            console.log("Snapshot:", modelRef.current?.api.getSnapshot());
+            // Update grid rows whenever model changes
             setGridRows(modelToGrid(modelRef.current));
-            // setGridColumns(
-            //     (modelRef.current?.api.getSnapshot().columnNames || [])
-            //     .map((name, i) => ({...keyColumn(name, textColumn), title: name}))
-            // );
             setPrevRows(modelRef.current?.api.getSnapshot().rows || []);
         });
         
@@ -160,28 +158,19 @@ function App() {
     
 
     function processMessage(binaryData) {
-        console.log('First message:', isFirstMessageRef.current);
-        console.log('processing message:', binaryData);
+        console.log('Processing message:', binaryData);
         if (isFirstMessageRef.current) {
             try {
-                const bd = Uint8Array.from(Object.values(binaryData))
+                const bd = Uint8Array.from(Object.values(binaryData));
                 const model = Model.fromBinary(bd).fork(sessionId);
                 console.log('Model successfully created:', model.view());
                 return model;
             } catch (e) {
-                console.error('Error processing message:', e);
-            }
-        } else {
-            if (!modelRef.current) return;
-            const patchData = decode(JSON.parse(binaryData));
-            try {
-                //const patch = Patch.patchData;
-                setModel(modelRef.current.applyPatch(patchData));
-                console.log("Applied patch to model");
-            } catch (error) {
-                console.error("Error applying patch:", error);
+                console.error('Error creating model from binary data:', e);
+                return null;
             }
         }
+        return null;
     }
 
     // when the app loads, create a new model from the server
@@ -193,55 +182,55 @@ function App() {
         onMessage: (event) => {
             console.log('Raw event data type:', typeof event.data);
             let message;
-            let model;
     
-            // Handle different potential WebSocket data formats
-            if (event.data instanceof Blob) {
-                console.log('input blob')
-                // Convert Blob to ArrayBuffer first
-                const reader = new FileReader();
-                reader.onload = () => {
-                    message = new Uint8Array(reader.result as ArrayBuffer);
-                    processMessage(message);
-                };
-                reader.readAsArrayBuffer(event.data);
-                return;
-            } else if (typeof event.data === 'string') {
-                // Handle string data
-                try {
-                    if (isFirstMessageRef.current) {
-                        console.log('First message model')
-                        const parsed = JSON.parse(event.data);
-                        message = new Uint8Array(Object.values(parsed));
-                        if (!message) {
-                            message = decode(JSON.parse(event.data));
+            try {
+                if (event.data instanceof Blob) {
+                    console.log('Received blob data');
+                    // Convert Blob to ArrayBuffer first
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const arrayBuffer = reader.result as ArrayBuffer;
+                        message = new Uint8Array(arrayBuffer);
+                        const updatedModel = processMessage(message);
+                        if (updatedModel) {
+                            setModel(updatedModel);
+                            // Update grid rows based on new model
+                            setGridRows(modelToGrid(updatedModel));
                         }
-                        setModel(modelRef.current?.applyPatch(message));
-                    } else {
-                        console.log('Not first message model - apply patch')
-                        const parsed = JSON.parse(event.data)
-                        const message = decode(parsed)
-                        console.log('message', message)
-                        modelRef.current?.applyPatch(message)
-                    }
-                    console.log('input string')
-                    console.log(event.data)
-                    
-                } catch (e) {
-                    console.error('Failed to parse string data:', e);
+                    };
+                    reader.readAsArrayBuffer(event.data);
                     return;
+                } else if (typeof event.data === 'string') {
+                    console.log('Received string data');
+                    const parsed = JSON.parse(event.data);
+                    
+                    if (isFirstMessageRef.current) {
+                        // First message - create a new model
+                        message = new Uint8Array(Object.values(parsed));
+                        const updatedModel = processMessage(message);
+                        if (updatedModel) {
+                            setModel(updatedModel);
+                            setGridRows(modelToGrid(updatedModel));
+                            isFirstMessageRef.current = false;
+                        }
+                    } else {
+                        // Subsequent messages - apply patch to existing model
+                        if (!modelRef.current) return;
+                        
+                        try {
+                            const patchData = decode(parsed);
+                            modelRef.current.applyPatch(patchData);
+                            console.log("Applied patch to model");
+                            // Update the UI after applying patch
+                            setGridRows(modelToGrid(modelRef.current));
+                        } catch (error) {
+                            console.error("Error applying patch:", error);
+                        }
+                    }
                 }
-            } else {
-                // Assume it's already binary
-                //message = new Uint8Array(event.data);
-                message = decode(JSON.parse(event.data));
+            } catch (e) {
+                console.error('Error processing WebSocket message:', e);
             }
-            if (message) setModel(processMessage(message));
-            console.log('snapshot', getModel()?.api.getSnapshot())
-            console.log('Received message:', message);
-            console.log('Updated model snapshot:', getModel()?.api.getSnapshot());
-            setGridRows(modelToGrid(getModel()));
-            isFirstMessageRef.current = false;
         },
         shouldReconnect: (closeEvent) => {
             console.log('WebSocket closed. Reconnecting...', closeEvent)
