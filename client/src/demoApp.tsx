@@ -202,6 +202,39 @@ function App() {
         return null;
     }
 
+    function updateUIFromModel(model) {
+        const snapshot = model.api.getSnapshot();
+        latestSnapshotRef.current = snapshot;
+        setSnapshot(snapshot);
+        setGridRows(modelToGrid(model));
+    }
+
+    function handleModelUpdate(data) {
+        try {
+            // Convert data to appropriate format
+            const messageData = typeof data === 'string' 
+            ? new Uint8Array(Object.values(JSON.parse(data)))
+            : new Uint8Array(data);
+            
+            if (isFirstMessageRef.current) {
+            // First message - create model
+            const model = Model.fromBinary(messageData).fork(sessionId);
+            setModel(model);
+            updateUIFromModel(model);
+            isFirstMessageRef.current = false;
+            } else {
+            // Apply patch to existing model
+            if (!modelRef.current) return;
+            
+            const patchData = typeof data === 'string' ? decode(JSON.parse(data)) : decode(data);
+            modelRef.current.applyPatch(patchData);
+            updateUIFromModel(modelRef.current);
+            }
+        } catch (error) {
+            console.error('Error handling model update:', error);
+        }
+    }
+
     // when the app loads, create a new model from the server
     const WS_URL = 'ws://localhost:8000'
     const { sendJsonMessage, lastJsonMessage } = useWebSocket(WS_URL, {
@@ -209,96 +242,14 @@ function App() {
         onClose: () => console.log('WebSocket connection closed'),
         onError: (event) => console.error('WebSocket error:', event),
         onMessage: (event) => {
-            console.log('Raw event data type:', typeof event.data);
-            let message;
-
-            try {
-                if (event.data instanceof Blob) {
-                    console.log('Received blob data');
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        const arrayBuffer = reader.result as ArrayBuffer;
-                        message = new Uint8Array(arrayBuffer);
-                        const updatedModel = processMessage(message);
-                        console.log('Updated model :', updatedModel);
-                        console.log('message: ', message);
-                        
-                        if (updatedModel) {
-                          // Get snapshot before setting model
-                          const newSnapshot = updatedModel.api.getSnapshot();
-                          console.log('newSnapshot: ', newSnapshot);
-                          
-                          // Only update if rows have changed
-                          console.log('latest: ', latestSnapshotRef.current.rows);
-                          console.log('new:', newSnapshot.rows);
-                          if (!areRowsEqual(latestSnapshotRef.current.rows, newSnapshot.rows)) {
-                            setModel(updatedModel);
-                            latestSnapshotRef.current = newSnapshot;
-                            setSnapshot(newSnapshot);
-                            setGridRows(modelToGrid(updatedModel));
-                            console.log('model, snapshot, and grid updated')
-                          } else {
-                            // Still update the model but don't trigger re-renders
-                            modelRef.current = updatedModel;
-                          }
-                        }
-                    };
-                    reader.readAsArrayBuffer(event.data);
-
-                    console.log('Blob data processed');
-                    return;
-                } else if (typeof event.data === 'string') {
-                    //console.log('Received string data:', event.data);
-                    const parsed = JSON.parse(event.data);
-                    
-                    if (isFirstMessageRef.current) {
-                        // First message - create a new model
-                        message = new Uint8Array(Object.values(parsed));
-                        const updatedModel = processMessage(message);
-                        console.log('Updated model:', getModel()?.api.getSnapshot());
-                        if (updatedModel) {
-                          const initialSnapshot = updatedModel.api.getSnapshot();
-                          latestSnapshotRef.current = initialSnapshot;
-                          setSnapshot(initialSnapshot);
-                          setModel(updatedModel);
-                          setGridRows(modelToGrid(updatedModel));
-                          isFirstMessageRef.current = false;
-                        }
-                    } else {
-                        // Subsequent messages - apply patch to existing model
-                        if (!modelRef.current) return;
-                        
-                        try {
-                            // Store the snapshot before applying the patch
-                            const beforeSnapshot = modelRef.current.api.getSnapshot();
-                            
-                            // Apply the patch
-                            const patchData = decode(parsed);
-                            modelRef.current.applyPatch(patchData);
-                            //console.log("Applied patch to model");
-                            
-                            // Get the snapshot after applying the patch
-                            const afterSnapshot = modelRef.current.api.getSnapshot();
-                            latestSnapshotRef.current = afterSnapshot;
-                            setSnapshot(afterSnapshot);
-                            // Always update gridRows, even if rows are "equal"
-                            setGridRows(modelToGrid(modelRef.current));
-                                                        
-                            // Only update UI if rows changed
-                            if (!areRowsEqual(beforeSnapshot.rows, afterSnapshot.rows)) {
-                              setSnapshot(afterSnapshot);
-                              setGridRows(modelToGrid(modelRef.current));
-                              setPrevRows(afterSnapshot.rows || []);
-                            }
-                        } catch (error) {
-                            console.error("Error applying patch:", error);
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error('Error processing WebSocket message:', e);
+            if (event.data instanceof Blob) {
+                const reader = new FileReader();
+                reader.onload = () => handleModelUpdate(reader.result);
+                reader.readAsArrayBuffer(event.data);
+            } else if (typeof event.data === 'string') {
+                handleModelUpdate(event.data);
             }
-        },
+            },
         shouldReconnect: (closeEvent) => {
             //console.log('WebSocket closed. Reconnecting...', closeEvent)
             return true
