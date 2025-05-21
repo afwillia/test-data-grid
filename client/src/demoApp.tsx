@@ -11,6 +11,25 @@ import './dataGridExtra.css'
 // Set a session ID for forking the model
 const sessionId = Math.floor(Math.random() * 10000);
 
+
+function forkModel(model, sessionId) {
+    const forkedModel = model.fork(sessionId);
+    return forkedModel;
+}
+
+function patchModel(model, patch) {
+    const newModel = model.applyPatch(patch);
+    return newModel;
+}
+
+function modelFromMessage(message, model, sessionId) {
+    if (model) {
+        patchModel(model, message);
+    } else {
+        forkModel(model, sessionId);
+    }
+}
+
 function gridToModel(gridRows, model) {
     const rows = gridRows.map(row => {
         const { ...rest } = row;
@@ -236,7 +255,7 @@ function App() {
                         // First message - create a new model
                         message = new Uint8Array(Object.values(parsed));
                         const updatedModel = processMessage(message);
-                        console.log('Updated model:', updatedModel?.api.getSnapshot);
+                        console.log('Updated model:', getModel()?.api.getSnapshot());
                         if (updatedModel) {
                           const initialSnapshot = updatedModel.api.getSnapshot();
                           latestSnapshotRef.current = initialSnapshot;
@@ -296,10 +315,10 @@ function App() {
         latestSnapshotRef.current = currentSnapshot;
         
         // Only update state if rows are different
-        //if (!areRowsEqual(snapshot.rows, currentSnapshot.rows)) {
+        if (!areRowsEqual(snapshot.rows, currentSnapshot.rows)) {
             setSnapshot(currentSnapshot);
             setGridRows(modelToGrid(modelRef.current));
-       // }
+        }
         
         // Subscribe to model changes with row equality check
         const unsubscribe = modelRef.current.api.subscribe(() => {
@@ -360,7 +379,7 @@ function App() {
         const patch = getModel()?.api.flush()
         let binaryData;
         if (patch) binaryData = encode(patch);
-        //console.log('Patch data upload:', patch);
+        console.log('Patch data upload:', patch);
         sendThrottledJsonMessage(binaryData);
 
         createdRowIds.clear()
