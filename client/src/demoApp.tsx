@@ -126,6 +126,7 @@ function modelToGrid(model) {
 
 function App() {
 
+    const [isLoading, setIsLoading] = useState(true);
     const modelRef = useRef<Model | null>(null);
     const latestSnapshotRef = useRef<any>({rows: [], columnNames: [], columnOrder: []});
     const getModel = () => modelRef.current;
@@ -238,7 +239,10 @@ function App() {
     // when the app loads, create a new model from the server
     const WS_URL = 'ws://localhost:8000'
     const { sendJsonMessage, lastJsonMessage } = useWebSocket(WS_URL, {
-        onOpen: () => console.log('WebSocket connection opened'),
+        onOpen: () => {
+            console.log('WebSocket connection opened');
+            setIsLoading(false);
+        },
         onClose: () => console.log('WebSocket connection closed'),
         onError: (event) => console.error('WebSocket error:', event),
         onMessage: (event) => {
@@ -357,76 +361,80 @@ function App() {
     return (
         <div>
             <h1>JSON CRDT Grid Demo</h1>
-            <div>
-                <button onClick={commit}>
-                    Commit
-                </button>
+            {isLoading ? (
+                <div className="loading-indicator">Loading data...</div>
+            ) : (
+                <div>
+                    <button onClick={commit}>
+                        Commit
+                    </button>
 
-                <button onClick={cancel}>
-                    Cancel
-                </button>
-                <DataSheetGrid
-                    value={gridRows}
-                    columns={gridColumns}
-                    rowClassName={({ rowData }) => {
-                        if (deletedRowIds.has(rowData.id)) {
-                        return 'row-deleted'
-                        }
-                        if (createdRowIds.has(rowData.id)) {
-                        return 'row-created'
-                        }
-                        if (updatedRowIds.has(rowData.id)) {
-                        return 'row-updated'
-                        }
-                    }}
-                    createRow={() => ({ id: genId() })}
-                    duplicateRow={({ rowData }) => ({ ...rowData, id: genId() })}
-                    onChange={(newValue, operations) => {
-                        for (const operation of operations) {
-                        if (operation.type === 'CREATE') {
-                            newValue
-                            .slice(operation.fromRowIndex, operation.toRowIndex)
-                            .forEach(({ id }) => createdRowIds.add(id))
-                        }
+                    <button onClick={cancel}>
+                        Cancel
+                    </button>
+                    <DataSheetGrid
+                        value={gridRows}
+                        columns={gridColumns}
+                        rowClassName={({ rowData }) => {
+                            if (deletedRowIds.has(rowData.id)) {
+                            return 'row-deleted'
+                            }
+                            if (createdRowIds.has(rowData.id)) {
+                            return 'row-created'
+                            }
+                            if (updatedRowIds.has(rowData.id)) {
+                            return 'row-updated'
+                            }
+                        }}
+                        createRow={() => ({ id: genId() })}
+                        duplicateRow={({ rowData }) => ({ ...rowData, id: genId() })}
+                        onChange={(newValue, operations) => {
+                            for (const operation of operations) {
+                            if (operation.type === 'CREATE') {
+                                newValue
+                                .slice(operation.fromRowIndex, operation.toRowIndex)
+                                .forEach(({ id }) => createdRowIds.add(id))
+                            }
 
-                        if (operation.type === 'UPDATE') {
-                            newValue
-                            .slice(operation.fromRowIndex, operation.toRowIndex)
-                            .forEach(({ id }) => {
-                                if (!createdRowIds.has(id) && !deletedRowIds.has(id)) {
-                                updatedRowIds.add(id)
-                                }
-                            })
-                        }
+                            if (operation.type === 'UPDATE') {
+                                newValue
+                                .slice(operation.fromRowIndex, operation.toRowIndex)
+                                .forEach(({ id }) => {
+                                    if (!createdRowIds.has(id) && !deletedRowIds.has(id)) {
+                                    updatedRowIds.add(id)
+                                    }
+                                })
+                            }
 
-                        if (operation.type === 'DELETE') {
-                            let keptRows = 0
+                            if (operation.type === 'DELETE') {
+                                let keptRows = 0
 
-                            gridRows
-                            .slice(operation.fromRowIndex, operation.toRowIndex)
-                            .forEach(({ id }, i) => {
-                                updatedRowIds.delete(id)
+                                gridRows
+                                .slice(operation.fromRowIndex, operation.toRowIndex)
+                                .forEach(({ id }, i) => {
+                                    updatedRowIds.delete(id)
 
-                                if (createdRowIds.has(id)) {
-                                createdRowIds.delete(id)
-                                } else {
-                                deletedRowIds.add(id)
-                                newValue.splice(
-                                    operation.fromRowIndex + keptRows++,
-                                    0,
-                                    gridRows[operation.fromRowIndex + i]
-                                )
-                                }
-                            })
-                        }
-                        }
+                                    if (createdRowIds.has(id)) {
+                                    createdRowIds.delete(id)
+                                    } else {
+                                    deletedRowIds.add(id)
+                                    newValue.splice(
+                                        operation.fromRowIndex + keptRows++,
+                                        0,
+                                        gridRows[operation.fromRowIndex + i]
+                                    )
+                                    }
+                                })
+                            }
+                            }
 
-                        setGridRows(newValue)
+                            setGridRows(newValue)
 
-                        autoCommitRef.current(newValue);
-      }}
-                />
-            </div>
+                            autoCommitRef.current(newValue);
+                        }}
+                    />
+                </div>
+            )}
         </div>
     )
 }
